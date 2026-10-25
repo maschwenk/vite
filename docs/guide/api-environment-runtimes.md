@@ -254,6 +254,17 @@ interface ModuleRunnerOptions {
     | 'prepareStackTrace'
     | InterceptorOptions
   /**
+   * Ask the server to send source maps separately from the module code, so
+   * the evaluated code has no inline source map comment and is cheaper to
+   * compile. Stack traces are still mapped by the `prepareStackTrace`
+   * interceptor, but debuggers attached to the runtime won't see the maps.
+   * Ignored when `sourcemapInterceptor` is `'node'`, because Node reads the
+   * inline comment.
+   *
+   * @default false
+   */
+  separateSourceMap?: boolean
+  /**
    * Disable HMR or configure HMR options.
    *
    * @default true

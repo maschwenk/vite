@@ -14,7 +14,11 @@ export {
 
 export { createWebSocketModuleRunnerTransport } from '../shared/moduleRunnerTransport'
 
-export type { FetchFunctionOptions, FetchResult } from '../shared/invokeMethods'
+export type {
+  FetchFunctionOptions,
+  FetchResult,
+  FetchResultSourceMap,
+} from '../shared/invokeMethods'
 export type {
   ModuleRunnerTransportHandlers,
   ModuleRunnerTransport,

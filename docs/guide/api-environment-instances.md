@@ -286,5 +286,12 @@ export interface ViteFetchResult {
    * Invalidate module on the client side.
    */
   invalidate: boolean
+  /**
+   * Source map of `code`, set when the runner requested `separateSourceMap`.
+   * `code` then has no inline source map comment.
+   */
+  map?: FetchResultSourceMap
 }
 ```
+
+When the runner passes `separateSourceMap: true` in `FetchFunctionOptions`, the source map is returned in `map` instead of being appended to `code` as a base64 comment. The `//# sourceURL` comment stays in `code`.

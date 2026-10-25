@@ -1,6 +1,11 @@
 export interface FetchFunctionOptions {
   cached?: boolean
   startOffset?: number
+  /**
+   * Return the source map in `ViteFetchResult.map` instead of inlining it
+   * into `ViteFetchResult.code`. Servers that don't support it ignore it.
+   */
+  separateSourceMap?: boolean
 }
 
 export type FetchResult =
@@ -54,6 +59,21 @@ export interface ViteFetchResult {
    * Invalidate module on the client side.
    */
   invalidate: boolean
+  /**
+   * Source map of `code`, set when the runner requested `separateSourceMap`.
+   * `code` then has no inline source map comment.
+   */
+  map?: FetchResultSourceMap
+}
+
+export interface FetchResultSourceMap {
+  version: number
+  mappings: string
+  names?: string[]
+  sources?: string[]
+  sourcesContent?: string[]
+  sourceRoot?: string
+  file?: string
 }
 
 export type InvokeSendData<

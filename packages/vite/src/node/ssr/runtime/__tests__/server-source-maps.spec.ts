@@ -4,12 +4,33 @@ import { describe, expect } from 'vitest'
 import type { ViteDevServer } from '../../..'
 import type { ModuleRunnerContext } from '../../../../module-runner'
 import { ESModulesEvaluator } from '../../../../module-runner'
-import { SOURCEMAPPING_URL } from '../../../../shared/constants'
+import {
+  MODULE_RUNNER_SOURCEMAPPING_SOURCE,
+  SOURCEMAPPING_URL,
+} from '../../../../shared/constants'
+import type { ViteFetchResult } from '../../../../shared/invokeMethods'
 import {
   createFixtureEditor,
   createModuleRunnerTester,
   resolvePath,
 } from './utils'
+
+const getError = async (cb: () => void): Promise<Error> => {
+  try {
+    await cb()
+    expect.unreachable()
+  } catch (err) {
+    return err
+  }
+}
+const serializeStack = (server: ViteDevServer, err: Error) => {
+  return err.stack!.split('\n')[1].replace(server.config.root, '<root>')
+}
+const serializeStackDeep = (server: ViteDevServer, err: Error) => {
+  return err
+    .stack!.split('\n')
+    .map((s) => s.replace(server.config.root, '<root>'))
+}
 
 describe('module runner initialization', async () => {
   const it = await createModuleRunnerTester(
@@ -18,23 +39,6 @@ describe('module runner initialization', async () => {
       sourcemapInterceptor: 'prepareStackTrace',
     },
   )
-
-  const getError = async (cb: () => void): Promise<Error> => {
-    try {
-      await cb()
-      expect.unreachable()
-    } catch (err) {
-      return err
-    }
-  }
-  const serializeStack = (server: ViteDevServer, err: Error) => {
-    return err.stack!.split('\n')[1].replace(server.config.root, '<root>')
-  }
-  const serializeStackDeep = (server: ViteDevServer, err: Error) => {
-    return err
-      .stack!.split('\n')
-      .map((s) => s.replace(server.config.root, '<root>'))
-  }
 
   it('source maps are correctly applied to stack traces', async ({
     runner,
@@ -240,6 +244,133 @@ describe('module runner initialization', async () => {
     } finally {
       globalThis.Buffer = bufferBackup
     }
+  })
+})
+
+describe('module runner with separate source maps', async () => {
+  const it = await createModuleRunnerTester(
+    {},
+    {
+      sourcemapInterceptor: 'prepareStackTrace',
+      separateSourceMap: true,
+    },
+  )
+
+  const throwsErrorMethod = resolvePath(
+    import.meta.url,
+    './fixtures/throws-error-method.ts',
+  )
+
+  it('maps stack traces without a map in the evaluated code', async ({
+    runner,
+    server,
+  }) => {
+    const error = await getError(async () => {
+      const mod = await runner.import('/fixtures/has-error-deep.ts')
+      mod.main()
+    })
+    expect(serializeStackDeep(server, error).slice(0, 3)).toEqual([
+      'Error: crash',
+      '    at crash (<root>/fixtures/has-error-deep.ts:2:9)',
+      '    at Module.main (<root>/fixtures/has-error-deep.ts:6:3)',
+    ])
+
+    const meta = runner.evaluatedModules.getModuleById(
+      resolvePath(import.meta.url, './fixtures/has-error-deep.ts'),
+    )!.meta!
+    expect(meta).toHaveProperty('map.version', 3)
+    expect(meta).toHaveProperty('code', expect.stringContaining('sourceURL='))
+    expect(meta).toHaveProperty(
+      'code',
+      expect.not.stringContaining(SOURCEMAPPING_URL),
+    )
+  })
+
+  it('maps stack traces to the new lines after the module is invalidated', async ({
+    runner,
+    server,
+  }) => {
+    const before = await getError(async () => {
+      const mod = await runner.import('/fixtures/throws-error-method.ts')
+      mod.throwError()
+    })
+    expect(serializeStack(server, before)).toBe(
+      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:6:9)',
+    )
+
+    createFixtureEditor().editFile(
+      throwsErrorMethod,
+      (code) => '\n\n\n\n\n' + code + '\n',
+    )
+    const { moduleGraph } = server.environments.ssr
+    moduleGraph.invalidateModule(moduleGraph.getModuleById(throwsErrorMethod)!)
+
+    const after = await getError(async () => {
+      const mod = await runner.import('/fixtures/throws-error-method.ts')
+      mod.throwError()
+    })
+    expect(serializeStack(server, after)).toBe(
+      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:11:9)',
+    )
+  })
+
+  it('inlines the map for runners that do not ask for it', async ({
+    environment,
+  }) => {
+    const result = await environment.fetchModule(
+      '/fixtures/throws-error-method.ts',
+    )
+    expect(result).not.toHaveProperty('map')
+    expect(result).toHaveProperty(
+      'code',
+      expect.stringContaining(MODULE_RUNNER_SOURCEMAPPING_SOURCE),
+    )
+  })
+
+  it('does not send a map inlined by an earlier fetch of the same module', async ({
+    environment,
+  }) => {
+    const url = '/fixtures/throws-error-method.ts'
+    const options = { separateSourceMap: true }
+    const first = await environment.fetchModule(url, undefined, options)
+    await environment.fetchModule(url)
+    const afterInline = await environment.fetchModule(url, undefined, options)
+
+    expect(afterInline).toHaveProperty('code', (first as ViteFetchResult).code)
+    expect(afterInline).toHaveProperty('map', (first as ViteFetchResult).map)
+  })
+
+  it('keeps module code that mentions the inline map marker', async ({
+    runner,
+  }) => {
+    const mod = await runner.import(
+      '/fixtures/string-literal-sourcemap-source.ts',
+    )
+    expect(mod.getMessage()).toBe(MODULE_RUNNER_SOURCEMAPPING_SOURCE)
+  })
+})
+
+describe('module runner with separate source maps and node interceptor', async () => {
+  const it = await createModuleRunnerTester(
+    {},
+    {
+      sourcemapInterceptor: 'node',
+      separateSourceMap: true,
+    },
+  )
+
+  it('keeps the map inline because node reads it from the code', async ({
+    runner,
+  }) => {
+    await runner.import('/fixtures/throws-error-method.ts')
+    const meta = runner.evaluatedModules.getModuleById(
+      resolvePath(import.meta.url, './fixtures/throws-error-method.ts'),
+    )!.meta!
+    expect(meta).not.toHaveProperty('map')
+    expect(meta).toHaveProperty(
+      'code',
+      expect.stringContaining(MODULE_RUNNER_SOURCEMAPPING_SOURCE),
+    )
   })
 })
 

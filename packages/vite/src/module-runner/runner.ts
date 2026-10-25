@@ -289,6 +289,9 @@ export class ModuleRunner {
               {
                 cached: isCached,
                 startOffset: this.evaluator.startOffset,
+                separateSourceMap:
+                  !!this.options.separateSourceMap &&
+                  this.options.sourcemapInterceptor !== 'node',
               },
             ])
       ) as ResolvedResult

@@ -157,13 +157,27 @@ function inlineSourceMap(
 
 // Unlike `inlineSourceMap`, this doesn't write to `result`: the transform
 // result is shared with runners that still want the map inlined
+interface SeparatedSourceMap {
+  startOffset: number | undefined
+  code: string
+  sourceMap: string
+}
+
+// Every runner that fetches a module gets the same transform result until the
+// module is invalidated, so separate its map once, like `inlineSourceMap` does
+// by writing to the result
+const separatedSourceMaps = new WeakMap<TransformResult, SeparatedSourceMap>()
+
 function separateSourceMap(
   mod: EnvironmentModuleNode,
   result: TransformResult,
   startOffset: number | undefined,
-): { code: string; sourceMap: string } | undefined {
+): SeparatedSourceMap | undefined {
   const map = result.map
   if (!map || !('version' in map)) return
+
+  const cached = separatedSourceMaps.get(result)
+  if (cached && cached.startOffset === startOffset) return cached
 
   // a runner with inline maps fetched this transform result first, so the
   // code already ends with the sourceURL and the trailer `inlineSourceMap` wrote
@@ -173,10 +187,13 @@ function separateSourceMap(
     trailer !== -1 &&
     code.indexOf('\n', trailer + INLINED_MAP_PREFIX.length) === code.length - 1
 
-  return {
+  const separated = {
+    startOffset,
     code: isInlined ? code.slice(0, trailer) : withSourceURL(mod, code),
     sourceMap: JSON.stringify(offsetSourceMap(map, startOffset)),
   }
+  separatedSourceMaps.set(result, separated)
+  return separated
 }
 
 function withSourceURL(mod: EnvironmentModuleNode, code: string) {

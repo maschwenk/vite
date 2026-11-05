@@ -4,7 +4,7 @@ import { DecodedMap } from './sourcemap/decoder'
 import type { ResolvedResult } from './types'
 import { decodeBase64 } from './utils'
 
-export const MODULE_RUNNER_SOURCEMAPPING_PREFIX: string = `//# ${SOURCEMAPPING_URL}=data:application/json;base64,`
+const MODULE_RUNNER_SOURCEMAPPING_PREFIX = `//# ${SOURCEMAPPING_URL}=data:application/json;base64,`
 
 export class EvaluatedModuleNode {
   public importers: Set<string> = new Set()

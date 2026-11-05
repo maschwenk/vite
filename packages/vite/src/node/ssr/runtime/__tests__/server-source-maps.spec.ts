@@ -270,33 +270,83 @@ describe('module runner initialization', async () => {
   })
 })
 
-describe('module runner source map transport', async () => {
+describe('module runner with dev.sourcemapForDebugger enabled', async () => {
   const evaluator = new RecordingEvaluator()
   const it = await createModuleRunnerTester(
     {},
     { sourcemapInterceptor: 'prepareStackTrace', evaluator },
   )
 
-  it('sends the map next to the code and adds it back before evaluating', async ({
+  it('keeps the map inlined in the evaluated code for debuggers', async ({
     runner,
-    environment,
   }) => {
     await runner.import('/fixtures/throws-error-method.ts')
     const meta = runner.evaluatedModules.getModuleById(throwsErrorMethod)!
       .meta as ViteFetchResult
-    expect(JSON.parse(meta.sourceMap!)).toHaveProperty('version', 3)
-    expect(meta.sourceMapComment).toBe(true)
-    expect(meta.code).toContain('//# sourceURL=')
-    expect(meta.code).not.toContain(SOURCEMAPPING_URL)
-
-    // a runner that gets the map inlined by the server evaluates the same code
-    const inlined = await environment.fetchModule(
-      '/fixtures/throws-error-method.ts',
-      undefined,
-      { startOffset: evaluator.startOffset },
+    expect(meta).not.toHaveProperty('sourceMap')
+    expect(evaluator.evaluated.get(throwsErrorMethod)).toContain(
+      inlineMapComment,
     )
-    expect(evaluator.evaluated.get(throwsErrorMethod)).toBe(
-      (inlined as ViteFetchResult).code,
+  })
+})
+
+describe('module runner with dev.sourcemapForDebugger disabled', async () => {
+  const evaluator = new RecordingEvaluator()
+  const it = await createModuleRunnerTester(
+    { environments: { ssr: { dev: { sourcemapForDebugger: false } } } },
+    // let `createServerModuleRunner` pick the interceptor
+    { sourcemapInterceptor: undefined, evaluator },
+  )
+
+  it('evaluates code without a map and still maps stack traces', async ({
+    runner,
+    server,
+  }) => {
+    expect(runner.options.sourcemapInterceptor).not.toBe('node')
+
+    const error = await getError(async () => {
+      const mod = await runner.import('/fixtures/has-error-deep.ts')
+      mod.main()
+    })
+    expect(serializeStackDeep(server, error).slice(0, 3)).toEqual([
+      'Error: crash',
+      '    at crash (<root>/fixtures/has-error-deep.ts:2:9)',
+      '    at Module.main (<root>/fixtures/has-error-deep.ts:6:3)',
+    ])
+
+    const id = resolvePath(import.meta.url, './fixtures/has-error-deep.ts')
+    const meta = runner.evaluatedModules.getModuleById(id)!
+      .meta as ViteFetchResult
+    expect(JSON.parse(meta.sourceMap!)).toHaveProperty('version', 3)
+    expect(meta.code).toContain('//# sourceURL=')
+    expect(evaluator.evaluated.get(id)).not.toContain(SOURCEMAPPING_URL)
+  })
+
+  it('maps stack traces to the new lines after the module is invalidated', async ({
+    runner,
+    server,
+  }) => {
+    const before = await getError(async () => {
+      const mod = await runner.import('/fixtures/throws-error-method.ts')
+      mod.throwError()
+    })
+    expect(serializeStack(server, before)).toBe(
+      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:6:9)',
+    )
+
+    createFixtureEditor().editFile(
+      throwsErrorMethod,
+      (code) => '\n\n\n\n\n' + code + '\n',
+    )
+    const { moduleGraph } = server.environments.ssr
+    moduleGraph.invalidateModule(moduleGraph.getModuleById(throwsErrorMethod)!)
+
+    const after = await getError(async () => {
+      const mod = await runner.import('/fixtures/throws-error-method.ts')
+      mod.throwError()
+    })
+    expect(serializeStack(server, after)).toBe(
+      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:11:9)',
     )
   })
 
@@ -339,67 +389,6 @@ describe('module runner source map transport', async () => {
   })
 })
 
-describe('module runner with dev.sourcemapForDebugger disabled', async () => {
-  const evaluator = new RecordingEvaluator()
-  const it = await createModuleRunnerTester(
-    { environments: { ssr: { dev: { sourcemapForDebugger: false } } } },
-    // let `createServerModuleRunner` pick the interceptor
-    { sourcemapInterceptor: undefined, evaluator },
-  )
-
-  it('evaluates code without a map and still maps stack traces', async ({
-    runner,
-    server,
-  }) => {
-    expect(runner.options.sourcemapInterceptor).not.toBe('node')
-
-    const error = await getError(async () => {
-      const mod = await runner.import('/fixtures/has-error-deep.ts')
-      mod.main()
-    })
-    expect(serializeStackDeep(server, error).slice(0, 3)).toEqual([
-      'Error: crash',
-      '    at crash (<root>/fixtures/has-error-deep.ts:2:9)',
-      '    at Module.main (<root>/fixtures/has-error-deep.ts:6:3)',
-    ])
-
-    const id = resolvePath(import.meta.url, './fixtures/has-error-deep.ts')
-    const meta = runner.evaluatedModules.getModuleById(id)!
-      .meta as ViteFetchResult
-    expect(meta.sourceMap).toBeTypeOf('string')
-    expect(meta).not.toHaveProperty('sourceMapComment')
-    expect(evaluator.evaluated.get(id)).not.toContain(SOURCEMAPPING_URL)
-  })
-
-  it('maps stack traces to the new lines after the module is invalidated', async ({
-    runner,
-    server,
-  }) => {
-    const before = await getError(async () => {
-      const mod = await runner.import('/fixtures/throws-error-method.ts')
-      mod.throwError()
-    })
-    expect(serializeStack(server, before)).toBe(
-      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:6:9)',
-    )
-
-    createFixtureEditor().editFile(
-      throwsErrorMethod,
-      (code) => '\n\n\n\n\n' + code + '\n',
-    )
-    const { moduleGraph } = server.environments.ssr
-    moduleGraph.invalidateModule(moduleGraph.getModuleById(throwsErrorMethod)!)
-
-    const after = await getError(async () => {
-      const mod = await runner.import('/fixtures/throws-error-method.ts')
-      mod.throwError()
-    })
-    expect(serializeStack(server, after)).toBe(
-      '    at Module.throwError (<root>/fixtures/throws-error-method.ts:11:9)',
-    )
-  })
-})
-
 describe('module runner with dev.sourcemapForDebugger disabled and the node interceptor', async () => {
   const evaluator = new RecordingEvaluator()
   const it = await createModuleRunnerTester(
@@ -407,10 +396,13 @@ describe('module runner with dev.sourcemapForDebugger disabled and the node inte
     { sourcemapInterceptor: 'node', evaluator },
   )
 
-  it('adds the map to the evaluated code because node reads it there', async ({
+  it('keeps the map inlined because node reads it from the evaluated code', async ({
     runner,
   }) => {
     await runner.import('/fixtures/throws-error-method.ts')
+    const meta = runner.evaluatedModules.getModuleById(throwsErrorMethod)!
+      .meta as ViteFetchResult
+    expect(meta).not.toHaveProperty('sourceMap')
     expect(evaluator.evaluated.get(throwsErrorMethod)).toContain(
       inlineMapComment,
     )

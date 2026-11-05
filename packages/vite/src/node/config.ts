@@ -257,12 +257,13 @@ export interface DevEnvironmentOptions {
   moduleRunnerTransform?: boolean
 
   /**
-   * Whether module runners add the source map to the code they evaluate as an
-   * inline `sourceMappingURL` comment. Debuggers, Node's own source map support
+   * Whether the code module runners evaluate keeps the source map as an inline
+   * `sourceMappingURL` comment. Debuggers, Node's own source map support
    * (`sourcemapInterceptor: 'node'`) and `NODE_V8_COVERAGE` read the map from
-   * there. When disabled, the evaluated code has no source map comment, which
-   * makes it cheaper to compile, and `createServerModuleRunner` maps stack
-   * traces with the `'prepareStackTrace'` interceptor by default.
+   * there. When disabled, the server sends the map next to the code instead,
+   * the evaluated code is cheaper to compile, and `createServerModuleRunner`
+   * maps stack traces with the `'prepareStackTrace'` interceptor by default.
+   * Runners using the `'node'` interceptor still get the inline comment.
    * @default true
    */
   sourcemapForDebugger?: boolean

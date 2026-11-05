@@ -17,15 +17,6 @@ export const decodeBase64: (base64: string) => string = (() => {
     textDecoder.decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)))
 })()
 
-export const encodeBase64 = (text: string): string =>
-  typeof Buffer === 'function'
-    ? Buffer.from(text, 'utf-8').toString('base64')
-    : btoa(
-        Array.from(new TextEncoder().encode(text), (c) =>
-          String.fromCharCode(c),
-        ).join(''),
-      )
-
 const CHAR_FORWARD_SLASH = 47
 const CHAR_BACKWARD_SLASH = 92
 

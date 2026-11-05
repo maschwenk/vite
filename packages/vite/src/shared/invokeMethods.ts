@@ -2,8 +2,9 @@ export interface FetchFunctionOptions {
   cached?: boolean
   startOffset?: number
   /**
-   * Return the source map in `sourceMap` instead of inlining it in `code`.
-   * Servers that don't support it ignore it and inline the map as before.
+   * Return the source map in `sourceMap` instead of inlining it in `code`
+   * when the environment doesn't need it for debuggers. Servers that don't
+   * support it ignore it and inline the map as before.
    */
   separateSourceMap?: boolean
 }
@@ -61,16 +62,10 @@ export interface ViteFetchResult {
   invalidate: boolean
   /**
    * Source map of `code` as a JSON string. Set when the runner asked for
-   * `separateSourceMap`, in which case `code` has no inline source map.
+   * `separateSourceMap` and the environment's `dev.sourcemapForDebugger` is
+   * disabled, in which case `code` has no inline source map.
    */
   sourceMap?: string
-  /**
-   * Whether the runner should add `sourceMap` to the evaluated code as an
-   * inline `sourceMappingURL` comment, for debuggers and other tools that read
-   * the map from the evaluated code. Follows the environment's
-   * `dev.sourcemapForDebugger` option.
-   */
-  sourceMapComment?: boolean
 }
 
 export type InvokeSendData<

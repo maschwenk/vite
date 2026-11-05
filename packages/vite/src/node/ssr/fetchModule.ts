@@ -100,8 +100,12 @@ export async function fetchModule(
     )
   }
 
+  // with debugger source maps, the map stays inlined: the server writes it into
+  // the shared transform result once, rather than every runner encoding it
   const separate =
-    options.inlineSourceMap !== false && !!options.separateSourceMap
+    options.inlineSourceMap !== false &&
+    !!options.separateSourceMap &&
+    !environment.config.dev.sourcemapForDebugger
 
   if (options.inlineSourceMap !== false && !separate) {
     result = inlineSourceMap(mod, result, options.startOffset)
@@ -122,10 +126,6 @@ export async function fetchModule(
     url: mod.url,
     invalidate: !cached,
     ...(separated && { sourceMap: separated.sourceMap }),
-    ...(separated &&
-      environment.config.dev.sourcemapForDebugger && {
-        sourceMapComment: true,
-      }),
   }
 }
 

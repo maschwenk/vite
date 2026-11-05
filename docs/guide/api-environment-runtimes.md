@@ -242,7 +242,8 @@ interface ModuleRunnerOptions {
   transport: ModuleRunnerTransport
   /**
    * Configure how source maps are resolved.
-   * Prefers `node` if `process.setSourceMapsEnabled` is available.
+   * Prefers `node` if `process.setSourceMapsEnabled` is available and the
+   * environment's `dev.sourcemapForDebugger` option is enabled.
    * Otherwise it will use `prepareStackTrace` by default which overrides
    * `Error.prepareStackTrace` method.
    * You can provide an object to configure how file contents and

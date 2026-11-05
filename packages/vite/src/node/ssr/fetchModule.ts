@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import type { SourceMap } from 'rolldown'
 import type { FetchResult } from 'vite/module-runner'
 import type { EnvironmentModuleNode, TransformResult } from '..'
 import {
@@ -14,6 +15,7 @@ import { isBuiltin, isExternalUrl, isFilePathESM } from '../utils'
 export interface FetchModuleOptions {
   cached?: boolean
   inlineSourceMap?: boolean
+  separateSourceMap?: boolean
   startOffset?: number
 }
 
@@ -98,7 +100,10 @@ export async function fetchModule(
     )
   }
 
-  if (options.inlineSourceMap !== false) {
+  const separate =
+    options.inlineSourceMap !== false && !!options.separateSourceMap
+
+  if (options.inlineSourceMap !== false && !separate) {
     result = inlineSourceMap(mod, result, options.startOffset)
   }
 
@@ -106,12 +111,21 @@ export async function fetchModule(
   if (result.code[0] === '#')
     result.code = result.code.replace(/^#!.*/, (s) => ' '.repeat(s.length))
 
+  const separated = separate
+    ? separateSourceMap(mod, result, options.startOffset)
+    : undefined
+
   return {
-    code: result.code,
+    code: separated?.code ?? result.code,
     file: mod.file,
     id: mod.id!,
     url: mod.url,
     invalidate: !cached,
+    ...(separated && { sourceMap: separated.sourceMap }),
+    ...(separated &&
+      environment.config.dev.sourcemapForDebugger && {
+        sourceMapComment: true,
+      }),
   }
 }
 
@@ -120,35 +134,62 @@ const OTHER_SOURCE_MAP_REGEXP = new RegExp(
   'gm',
 )
 
+const INLINED_MAP_PREFIX = `${MODULE_RUNNER_SOURCEMAPPING_SOURCE}\n//# ${SOURCEMAPPING_URL}=`
+
 function inlineSourceMap(
   mod: EnvironmentModuleNode,
   result: TransformResult,
   startOffset: number | undefined,
 ) {
   const map = result.map
-  let code = result.code
 
   if (
     !map ||
     !('version' in map) ||
-    code.includes(MODULE_RUNNER_SOURCEMAPPING_SOURCE)
+    result.code.includes(MODULE_RUNNER_SOURCEMAPPING_SOURCE)
   )
     return result
 
-  // to reduce the payload size, we only inline vite node source map, because it's also the only one we use
+  result.code = `${withSourceURL(mod, result.code)}${INLINED_MAP_PREFIX}${genSourceMapUrl(offsetSourceMap(map, startOffset))}\n`
+
+  return result
+}
+
+// Unlike `inlineSourceMap`, this doesn't write to `result`: the transform
+// result is shared with runners that still want the map inlined
+function separateSourceMap(
+  mod: EnvironmentModuleNode,
+  result: TransformResult,
+  startOffset: number | undefined,
+): { code: string; sourceMap: string } | undefined {
+  const map = result.map
+  if (!map || !('version' in map)) return
+
+  // a runner with inline maps fetched this transform result first, so the
+  // code already ends with the sourceURL and the trailer `inlineSourceMap` wrote
+  const code = result.code
+  const trailer = code.lastIndexOf(INLINED_MAP_PREFIX)
+  const isInlined =
+    trailer !== -1 &&
+    code.indexOf('\n', trailer + INLINED_MAP_PREFIX.length) === code.length - 1
+
+  return {
+    code: isInlined ? code.slice(0, trailer) : withSourceURL(mod, code),
+    sourceMap: JSON.stringify(offsetSourceMap(map, startOffset)),
+  }
+}
+
+function withSourceURL(mod: EnvironmentModuleNode, code: string) {
+  // to reduce the payload size, we only keep vite node source map, because it's also the only one we use
   OTHER_SOURCE_MAP_REGEXP.lastIndex = 0
   if (OTHER_SOURCE_MAP_REGEXP.test(code))
     code = code.replace(OTHER_SOURCE_MAP_REGEXP, '')
 
-  const sourceMap = startOffset
-    ? {
-        ...map,
-        mappings: ';'.repeat(startOffset) + map.mappings,
-      }
-    : map
-  result.code = `${code.trimEnd()}\n//# sourceURL=${encodeSourceURL(
-    mod.id!,
-  )}\n${MODULE_RUNNER_SOURCEMAPPING_SOURCE}\n//# ${SOURCEMAPPING_URL}=${genSourceMapUrl(sourceMap)}\n`
+  return `${code.trimEnd()}\n//# sourceURL=${encodeSourceURL(mod.id!)}\n`
+}
 
-  return result
+function offsetSourceMap(map: SourceMap, startOffset: number | undefined) {
+  return startOffset
+    ? { ...map, mappings: ';'.repeat(startOffset) + map.mappings }
+    : map
 }

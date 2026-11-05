@@ -1,5 +1,6 @@
 import type { ViteHotContext } from '#types/hot'
 import { createIsBuiltin } from '../shared/builtin'
+import { MODULE_RUNNER_SOURCEMAPPING_SOURCE } from '../shared/constants'
 import { HMRClient, HMRContext, type HMRLogger } from '../shared/hmr'
 import {
   type NormalizedModuleRunnerTransport,
@@ -18,7 +19,10 @@ import {
 import { createDefaultImportMeta } from './createImportMeta'
 import { ESModulesEvaluator } from './esmEvaluator'
 import type { EvaluatedModuleNode } from './evaluatedModules'
-import { EvaluatedModules } from './evaluatedModules'
+import {
+  EvaluatedModules,
+  MODULE_RUNNER_SOURCEMAPPING_PREFIX,
+} from './evaluatedModules'
 import { createHMRHandlerForRunner } from './hmrHandler'
 import { hmrLogger, silentConsole } from './hmrLogger'
 import { enableSourceMapSupport } from './sourcemap/index'
@@ -29,7 +33,12 @@ import type {
   ResolvedResult,
   SSRImportMetadata,
 } from './types'
-import { posixDirname, posixPathToFileHref, posixResolve } from './utils'
+import {
+  encodeBase64,
+  posixDirname,
+  posixPathToFileHref,
+  posixResolve,
+} from './utils'
 
 interface ModuleRunnerDebugger {
   (formatter: unknown, ...args: unknown[]): void
@@ -289,6 +298,7 @@ export class ModuleRunner {
               {
                 cached: isCached,
                 startOffset: this.evaluator.startOffset,
+                separateSourceMap: true,
               },
             ])
       ) as ResolvedResult
@@ -417,7 +427,17 @@ export class ModuleRunner {
 
     this.debug?.('[module runner] executing', href)
 
-    await this.evaluator.runInlinedModule(context, code, mod)
+    // debuggers, Node's own source map support and `NODE_V8_COVERAGE` read
+    // the map from the evaluated code; stack traces mapped by the
+    // `prepareStackTrace` interceptor read it from the module instead
+    const evaluatedCode =
+      fetchResult.sourceMap &&
+      (fetchResult.sourceMapComment ||
+        this.options.sourcemapInterceptor === 'node')
+        ? `${code}${MODULE_RUNNER_SOURCEMAPPING_SOURCE}\n${MODULE_RUNNER_SOURCEMAPPING_PREFIX}${encodeBase64(fetchResult.sourceMap)}\n`
+        : code
+
+    await this.evaluator.runInlinedModule(context, evaluatedCode, mod)
 
     return exports
   }

@@ -6,7 +6,7 @@ import type {
   TransformOptions as OxcTransformOptions,
   TransformResult as OxcTransformResult,
 } from 'rolldown/utils'
-import { transformSync } from 'rolldown/utils'
+import { transform } from 'rolldown/utils'
 import type { FSWatcher } from '#dep-types/chokidar'
 import type { Environment } from '..'
 import { cleanUrl } from '../../shared/utils'
@@ -149,7 +149,7 @@ export async function transformWithOxc(
     lang,
   }
 
-  const result = transformSync(
+  const result = await transform(
     filename,
     code,
     resolvedOptions,

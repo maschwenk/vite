@@ -52,6 +52,7 @@ jobs:
       - name: Loop bundled serve
         shell: bash
         run: |
+          set +e +o pipefail
           end=$((SECONDS + 40 * 60))
           i=0
           : > summary.txt

@@ -201,6 +201,15 @@ export class BundledDev {
 
     this._devEngine = await dev(rolldownOptions, outputOptions, {
       onHmrUpdates: (result) => {
+        ;(globalThis as any).__diagHmr?.push({
+          t: performance.now(),
+          kind: 'hmr',
+          changedFiles: result instanceof Error ? 'ERR' : result.changedFiles,
+          types:
+            result instanceof Error
+              ? []
+              : result.updates.map((u) => u.update.type),
+        })
         if (result instanceof Error) {
           this.environment.logger.error(
             colors.red(`✘ Build error: ${result.message}`),
@@ -239,6 +248,10 @@ export class BundledDev {
         }
       },
       onOutput: (result) => {
+        ;(globalThis as any).__diagHmr?.push({
+          t: performance.now(),
+          kind: 'output',
+        })
         if (result instanceof Error) {
           this.environment.logger.error(
             colors.red(`✘ Build error: ${result.message}`),
@@ -381,6 +394,11 @@ export class BundledDev {
       `TRIGGER-LAZY: trigger lazy bundling for module ${moduleId} for client ${clientId}`,
     )
     const result = await this.devEngine.compileEntry(moduleId, clientId)
+    ;(globalThis as any).__diagHmr?.push({
+      t: performance.now(),
+      kind: 'lazy',
+      moduleId,
+    })
     this.pendingPayloadFilenames.add(result.filename)
     // Serve the chunk's sourcemap, the same way an eager chunk's and an HMR
     // patch's maps are served. The chunk's relative `sourceMappingURL` resolves

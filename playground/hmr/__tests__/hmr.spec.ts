@@ -2,6 +2,8 @@ import { stripVTControlCharacters } from 'node:util'
 import type { Page } from 'playwright-chromium'
 import { beforeAll, describe, expect, it, test } from 'vitest'
 import {
+  diagEdit,
+  diagStart,
   addFile,
   browser,
   browserLogs,
@@ -828,6 +830,7 @@ if (!isBuild) {
         it('accepts itself if all its exports are accepted', async () => {
           const fileName = 'deps-all-accepted.ts'
           const file = `${testDir}/${fileName}`
+          diagStart()
 
           await untilBrowserLogAfterNavigation(
             () => openPage(testDir),
@@ -838,12 +841,16 @@ if (!isBuild) {
             },
           )
 
-          await untilBrowserLogAfter(
+          let p1: Promise<string[]>
+          await diagEdit(
+            `${testDirName}#1`,
+            file,
             () => {
+              p1 = untilBrowserLogAfter(() => {}, HOT_UPDATED)
               editFile(file, (code) => code.replace(/([abc])0/g, '$11') + '\n')
             },
-            HOT_UPDATED,
-            (logs) => {
+            async () => {
+              const logs = await p1
               expect(logs).toStrictEqual([
                 'all >>>>>> a1, b1, c1',
                 hotUpdatedLog(file),
@@ -851,12 +858,16 @@ if (!isBuild) {
             },
           )
 
-          await untilBrowserLogAfter(
+          let p2: Promise<string[]>
+          await diagEdit(
+            `${testDirName}#2`,
+            file,
             () => {
+              p2 = untilBrowserLogAfter(() => {}, HOT_UPDATED)
               editFile(file, (code) => code.replace(/([abc])1/g, '$12') + '\n')
             },
-            HOT_UPDATED,
-            (logs) => {
+            async () => {
+              const logs = await p2
               expect(logs).toStrictEqual([
                 'all >>>>>> a2, b2, c2',
                 hotUpdatedLog(file),

@@ -1,0 +1,81 @@
+name: Flake hunt
+
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  VITEST_SEGFAULT_RETRY: 3
+
+permissions: {}
+
+on:
+  push:
+    branches:
+      - "diag/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hunt:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        shard: [1, 2, 3, 4]
+    runs-on: ${{ matrix.os }}
+    name: "hunt: ${{ matrix.os }} #${{ matrix.shard }}"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
+        with:
+          runtime: node@26
+          cache: true
+
+      - name: (windows) Set Playwright path
+        if: runner.os == 'Windows'
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$HOME\.cache\playwright-bin" >> $env:GITHUB_ENV
+      - name: (non-windows) Set Playwright path
+        if: runner.os != 'Windows'
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/playwright-bin" >> $GITHUB_ENV
+
+      - name: Install Playwright
+        run: pnpm playwright install chromium
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Loop bundled serve
+        shell: bash
+        run: |
+          end=$((SECONDS + 40 * 60))
+          i=0
+          : > summary.txt
+          : > diag.txt
+          while [ $SECONDS -lt $end ]; do
+            i=$((i + 1))
+            pnpm vitest run -c vitest.config.e2e.ts --project serve-bundled > run.log 2>&1 || true
+            sed 's/\x1b\[[0-9;]*m//g' run.log > clean.log
+            fails=$(grep -E '^ *FAIL ' clean.log | sed -E 's/^ *FAIL +//' | sort -u)
+            echo "iter $i: $(echo "$fails" | grep -c .) failing" >> summary.txt
+            grep -E '^DIAG-OK' clean.log | sed "s/^/iter $i /" >> diag.txt || true
+            if [ -n "$fails" ]; then
+              echo "$fails" | sed "s/^/  /" >> summary.txt
+              echo "::group::iter $i failures"
+              grep -E -A14 '^DIAG-FLAKE' clean.log | head -200
+              grep -E -A8 '^ *FAIL ' clean.log | head -120
+              echo "::endgroup::"
+            fi
+          done
+          echo "::group::diag ok lines"
+          cat diag.txt
+          echo "::endgroup::"
+          echo "::group::summary"
+          cat summary.txt
+          echo "::endgroup::"
+          echo "ITERATIONS=$i"
+          grep -E '^  ' summary.txt | sort | uniq -c | sort -rn

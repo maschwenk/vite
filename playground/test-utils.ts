@@ -21,9 +21,11 @@ import { normalizePath } from 'vite'
 import { expect } from 'vitest'
 import type { TaskMeta, TestOptions } from 'vitest'
 import {
+  browserLogs,
   isBundledDev,
   isWindows,
   page,
+  serverLogs,
   sourcemapSnapshot,
   testDir,
   viteServer,
@@ -584,4 +586,61 @@ export function bundledDevUnsupported(
   issues?: BundledDevIssues,
 ): TestOptions {
   return { tags: ['bundled-dev/unsupported'], meta: { reason, issues } }
+}
+
+// DIAG: flake hunt helpers, not for merging
+export function diagStart(): void {
+  ;(globalThis as any).__diagHmr = []
+  ;(globalThis as any).__diagT0 = performance.now()
+}
+
+function diagStat(file: string) {
+  const st = fs.statSync(path.resolve(testDir, file), { bigint: true })
+  return `mtimeNs=${st.mtimeNs} size=${st.size}`
+}
+
+export async function diagEdit(
+  label: string,
+  file: string,
+  edit: () => void,
+  wait: () => Promise<unknown>,
+): Promise<void> {
+  const t0 = (globalThis as any).__diagT0 ?? 0
+  const rel = (t: number) => (t - t0).toFixed(1)
+  const before = diagStat(file)
+  const tEdit = performance.now()
+  edit()
+  const after = diagStat(file)
+  const browserLogStart = browserLogs.length
+  const serverLogStart = serverLogs.length
+  try {
+    await wait()
+    const events = ((globalThis as any).__diagHmr ?? []) as any[]
+    const firstHmr = events.find((e) => e.kind === 'hmr' && e.t > tEdit)
+    const lazy = events
+      .filter((e) => e.kind === 'lazy')
+      .map(
+        (e) => `${path.basename(e.moduleId).replace(/\?.*/, '')}@${rel(e.t)}`,
+      )
+      .join(',')
+    console.log(
+      `DIAG-OK ${label} edit@${rel(tEdit)} lazy=[${lazy}] hmr@${firstHmr ? rel(firstHmr.t) : '-'} latency=${firstHmr ? (firstHmr.t - tEdit).toFixed(1) : '-'} before[${before}] after[${after}]`,
+    )
+  } catch (e) {
+    const events = ((globalThis as any).__diagHmr ?? []) as any[]
+    const lines = [
+      `DIAG-FLAKE ${label} file=${file}`,
+      `  edit@${rel(tEdit)} before[${before}] after[${after}] now[${diagStat(file)}]`,
+      ...events.map(
+        (ev) =>
+          `  ev@${rel(ev.t)} ${ev.kind} ${ev.moduleId ?? ''} ${ev.changedFiles ? JSON.stringify(ev.changedFiles) : ''} ${ev.types ? JSON.stringify(ev.types) : ''}`,
+      ),
+      `  browserLogs since edit: ${JSON.stringify(browserLogs.slice(browserLogStart))}`,
+      `  browserLogs before edit (last 8): ${JSON.stringify(browserLogs.slice(Math.max(0, browserLogStart - 8), browserLogStart))}`,
+      `  serverLogs since edit: ${JSON.stringify(serverLogs.slice(serverLogStart).map((l) => l.replace(/\x1b\[[0-9;]*m/g, '')))}`,
+      `  content: ${JSON.stringify(fs.readFileSync(path.resolve(testDir, file), 'utf-8'))}`,
+    ]
+    console.log(lines.join('\n'))
+    throw e
+  }
 }
